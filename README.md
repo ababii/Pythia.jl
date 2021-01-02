@@ -1,2 +1,2 @@
 # Pythia.jl
-Time series machine learning in Julia.
+Machine learning time series in Julia.
