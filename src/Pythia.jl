@@ -1,6 +1,8 @@
 module Pythia
 
-include("sglasso.jl")
 export sglasso
+
+include("sglasso.jl")
+
 
 end
