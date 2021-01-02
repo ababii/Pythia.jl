@@ -1,8 +1,7 @@
 module Pythia
 
-export sglasso
-
-include("sglasso.jl")
-
+function addtwo(x,y)
+           x + y
+end
 
 end
