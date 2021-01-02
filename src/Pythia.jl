@@ -1,6 +1,6 @@
 module Pythia
 
-greet() = print("Hello World!")
+plusTwo(x) = return x+2
 include("sglasso.jl")
 
 end
