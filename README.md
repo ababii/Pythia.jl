@@ -1,1 +1,1 @@
-# Pythia
+# Pythia.jl
