@@ -16,9 +16,6 @@ function lasso(X, y, lambda; t = 0.1, K = 100)
     # X : array of training data of dimension T x p
     # y : array of dependent variable of dimension T x 1
     # lambda : regularization parameter 1 x 1
-    # alpha : relative wegiht of LASSO and group-LASSO penalties 1x1
-    # G0 : size of the first group
-    # G : size of the remaining groups
     # t : step size for the proximal coordinate descent
     # K : number of iterations
     T, p = size(X)
