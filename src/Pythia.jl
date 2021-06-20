@@ -1,7 +1,11 @@
 module Pythia
 
-export sglasso, glasso, lasso
+using Statistics, Distributions
 
-include("sglasso.jl")
+export sglasso, glasso, lasso
+export MeanForecast, fit
+
+include("algorithms/sglasso.jl")
+include("algorithms/basicMethods.jl")
 
 end
