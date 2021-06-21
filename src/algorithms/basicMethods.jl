@@ -6,7 +6,7 @@ mutable struct MeanForecast <: MeanForecastModel
     y::Vector{AbstractFloat}
     h::Integer
     level::Union{Nothing, Vector{Integer}}
-    function MeanForecast(y = []; h = 5, level = (80, 95)) # Constructor
+    function MeanForecast(y = []; h = 5, level = [80, 95]) # Constructor
         if length(y) <= 0
             error("The input array is empty")
         end
