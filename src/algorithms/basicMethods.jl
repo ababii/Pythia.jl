@@ -1,25 +1,26 @@
 abstract type MeanForecastModel end
-abstract type ResultsObj end
+abstract type NaiveForecastModel end
+abstract type ModelResults end
 
 ### Mean Forecast Model
 mutable struct MeanForecast <: MeanForecastModel
     y::Vector{AbstractFloat}
     h::Integer
-    level::Union{Nothing, Vector{Integer}}
-    function MeanForecast(y = []; h = 5, level = (80, 95)) # Constructor
+    level::Union{Nothing, Vector{AbstractFloat}}
+    function MeanForecast(y = []; h = 5, level = [80, 95]) # Constructor
         if length(y) <= 0
             error("The input array is empty")
         end
         if h <= 0
-            error("the number of prediction steps must be positive")
+            error("The h-value must be positive")
         end
 
-        # cleanPredInterval_(level) # TODO: implement this
+        cleanPredInterval_(level)
         return new(y, h, level)
     end
 end
 
-struct MeanForecastResults <: ResultsObj # Stores results from fit(MeanForecast)
+mutable struct MeanForecastResults <: ModelResults # Stores results from fit(MeanForecast)
     model::MeanForecastModel
     fittedvalues::Vector{Float64} # Vector of fitted values
     lower::Matrix{Float64}
@@ -52,4 +53,68 @@ function fit(model::MeanForecastModel)
 
     results = MeanForecastResults(model, fittedvalues, lower, upper)
     return results
+end
+
+### Naive Forecast Model
+mutable struct NaiveForecast <: NaiveForecastModel
+    y::Vector{AbstractFloat}
+    h::Integer
+    level::Union{Nothing, Vector{AbstractFloat}}
+    function NaiveForecast(y = []; h = 5, level = [80, 95]) # Constructor
+        if length(y) <= 0
+            error("The input array is empty")
+        end
+        if h <= 0
+            error("The h-value must be positive")
+        end
+        cleanPredInterval_(level)
+        return new(y, h, level)
+    end
+end
+
+mutable struct NaiveForecastResults <: ModelResults # Stores results from fit(MeanForecast)
+    model::NaiveForecastModel
+    fittedvalues::Vector{Float64} # Vector of fitted values
+    lower::Matrix{Float64} # Lower Prediction Interval Bound
+    upper::Matrix{Float64} # Upper Prediction Interval Bound
+    function NaiveForecastResults(model, fittedvalues, lower, upper)
+        return new(model, fittedvalues, lower, upper)
+    end
+end
+
+function fit(model::NaiveForecastModel)
+    y = model.y
+    h = model.h
+    level = model.level
+    data_size = length(y)
+
+    # Forecasts are equal to last value of observations
+    lastValue = last(y)
+    fitted_chunk = fill(lastValue, (h))
+    fittedvalues = vcat(y, fitted_chunk)
+
+    # Compute Prediction Intervals
+    lower = zeros(length(level), h)
+    upper = lower
+    for i in 1:length(level)
+        dist = Normal(0.0, 1.0)
+        qq = quantile(dist, 0.5 * (1 + level[i]/100))
+        lower[i, :] = fitted_chunk - qq * fitted_chunk
+        upper[i, :] = fitted_chunk + qq * fitted_chunk
+    end
+
+    results = NaiveForecastResults(model, fittedvalues, lower, upper)
+    return results
+end
+
+# Ensures Prediction Intervals are numerical and on the interval (0, 100)
+function cleanPredInterval_(level)
+    for i in level
+        if !isa(i, Number)
+            print(isa(i, Number))
+            error("Ensure that all level inputs are numeric")
+        elseif i < 0 || i > 100
+            error("Ensure that all confidence interval inputs are in the interval [0, 100]")
+        end
+    end
 end

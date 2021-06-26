@@ -3,7 +3,8 @@ module Pythia
 using Statistics, Distributions
 
 export sglasso, glasso, lasso
-export MeanForecast, fit
+export MeanForecast, NaiveForecast
+export fit
 
 include("algorithms/sglasso.jl")
 include("algorithms/basicMethods.jl")
