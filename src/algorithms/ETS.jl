@@ -1,7 +1,7 @@
 abstract type ETSModel end
 import Optim: optimize
 """
-SimpleExpSmoother
+SES
 Description:
     - Contains parameters and data to apply Simple Exponential Smoothing (SES)
     - Subtype of ETSModel, for future proofing
@@ -19,17 +19,17 @@ Constuctor:
 EXAMPLE USAGE:
     observations = [1.0, 2.0, 3.0]
     # Inputted values will be used if they are specified. Otherwise, they will be computed.
-    mdl = SimpleExpSmoother(observations, h = 5) 
-    mdl = SimpleExpSmoother(observations, alpha = 0.4)
-    mdl = SimpleExpSmoother(observations, alpha = 0.25, init_level = 500.0)
-    mdl = SimpleExpSmoother(observations, h = 15, alpha = 0.3, init_level = 750.0)
+    mdl = SES(observations, h = 5) 
+    mdl = SES(observations, alpha = 0.4) 
+    mdl = SES(observations, alpha = 0.25, init_level = 500.0) 
+    mdl = SES(observations, h = 15, alpha = 0.3, init_level = 750.0)
 """
-mutable struct SimpleExpSmoother <: ETSModel
+mutable struct SES <: ETSModel
     y::Vector{AbstractFloat}
     h::Integer
     alpha::Union{Nothing, Float64}
     init_level::Union{Nothing, Float64}
-    function SimpleExpSmoother(y = []; h = 5, alpha = nothing, init_level = nothing) # Constuctor 
+    function SES(y = []; h = 5, alpha = nothing, init_level = nothing) # Constuctor 
         # Input Cleaning
         if length(y) <= 0
             error("The input array is empty.")
@@ -50,7 +50,7 @@ Description:
     - Helper function
     - computes a forecast with Simple Exponential Smoothing (SES) [1]
 Parameters
-    - model: SimpleExpSmoother struct (defined above)
+    - model: SES struct (defined above)
     - Note: when makeForecast_ is called, all parameters have been calibrated.
 Returns:
     A tuple containing the following:
@@ -62,7 +62,7 @@ References:
         principles and practice*, 3rd edition, OTexts: Melbourne,
         Australia. OTexts.com/fpp3. Accessed on April 19th 2020.
 """
-function makeForecast_(model::ETSModel) # Return vector of fitted values of length h
+function makeForecast_(model::SES) # Return vector of fitted values of length h + SSE
     h = model.h
     alpha = model.alpha
     init_level = model.init_level
@@ -93,14 +93,14 @@ SSE_()
 Description:
     - Returns the Sum of Squared Errors for a given alpha and init_level.
 Parameters:
-    - model: SimpleExpSmoother struct (defined above)
+    - model: SES struct (defined above)
     - alpha: value of alpha used for computation
     - init_level: value of init_level used for computation
     - verbose: if verbose > 0, then the parameters will be printed as the are optimized.
 Returns:
     - Float64 res: the Sum of Squared Errors for the given alpha and init_level values.
 """
-function SSE_(model::ETSModel; alpha = nothing, init_level = nothing, verbose = 0) # Helper function for optimization
+function SSE_(model::SES; alpha = nothing, init_level = nothing, verbose = 0) # Helper function for optimization
     model.alpha = alpha
     model.init_level = init_level
 
@@ -137,14 +137,14 @@ Description:
     - modifies the 'model' directly.
     - after fit! is called, predict(model) is ready to be called
 Parameters:
-    - model: SimpleExpSmoother struct
+    - model: SES struct
     - v: verbosity, default = 0. if v > 0, verbose will be used.
 Computation of model parameters:
 'alpha' and 'init_value' are computed using LBFGS
 Returns:
     - nothing
 """
-function fit(model::ETSModel; v=0) # Set alpha + init_level
+function fit(model::SES; v=0) # Set alpha + init_level
     # Creating a copy of the user inputted params for the model as model.alpha and model.init_level will be updated later
     base_alpha = model.alpha
     base_init_level = model.init_level
@@ -187,7 +187,7 @@ Description:
     - computes a forecast with Simple Exponential Smoothing (SES) [1]
     - calls makeForecast_ a helper function, which returns a vector of fitted values and SSE error term.
 Parameters
-    - model: SimpleExpSmoother struct (defined above)
+    - model: SES struct (defined above)
     - Note: when predict is called, all parameters have been calibrated.
 Returns:
     A tuple containing the following:
@@ -199,4 +199,128 @@ References:
 """
 function predict(model::ETSModel)
     return makeForecast_(model)[1]
+end
+
+### Holt's Method - implementing Holt's linear trend method
+mutable struct Holt <: ETSModel
+    y::Vector{AbstractFloat}
+    h::Integer
+    alpha::Union{Nothing, Float64}
+    beta::Union{Nothing, Float64}
+    init_level::Union{Nothing, Float64}
+    init_trend::Union{Nothing, Float64}
+    function Holt(y = []; h = 5, alpha = nothing, beta = nothing, init_level = nothing, init_trend = nothing) # Constuctor 
+        # Input Cleaning
+        if length(y) <= 0
+            error("The input array is empty.")
+        end
+        if h <= 0
+            error("The number of prediction steps must be positive")
+        end
+
+        cleanParams_(alpha, "alpha")
+        cleanParams_(beta, "beta")
+
+        return new(y, h, alpha, beta, init_level, init_trend)
+    end 
+end
+
+function makeForecast_(model::Holt) # Return vector of fitted values of length h + SSE
+    h = model.h
+    alpha = model.alpha
+    beta = model.beta
+    init_level = model.init_level
+    init_trend = model.init_trend
+    y = model.y
+    data_size = length(y)
+
+    lvls = zeros(data_size + 1) # Stores level values, indices (0, T)
+    trends = zeros(data_size + 1) # Stores trend values, indices (0, T)
+    forecast = zeros(data_size + h) # Stores forecasted values, yhat, indices (1, T+h)
+
+    lvls[1] = init_level # Set l_0
+    trends[1] = init_trend # Set b_0
+
+    SSE = 0.0 # Compute Sum of Squared Errors
+
+    for i in 2:(length(lvls)) # Compute l_t's
+        lvls[i] = alpha * y[i-1] + (1 - alpha) * (lvls[i-1] + trends[i-1]) # level equation
+        trends[i] = beta * (lvls[i] - lvls[i-1]) + (1 - beta) * trends[i-1] # trned equation 
+        forecast[i-1] = lvls[i-1] + 1 * trends[i-1] # one-step ahead forecast
+        SSE += (forecast[i-1] - y[i-1])^2
+    end
+
+    for i in 1:h # Set forecasted values
+        forecast[data_size + i] = lvls[end] + i * trends[end]
+    end
+
+    return forecast, SSE
+end
+
+function SSE_(model::Holt; alpha = nothing, beta = nothing, init_level = nothing, init_trend = nothing, verbose = 0) # Helper function for optimization
+    model.alpha = alpha
+    model.beta = beta
+    model.init_level = init_level
+    model.init_trend = init_trend
+
+    res = makeForecast_(model)[2]
+    if verbose > 0
+        println("Error: $res, Alpha: $(model.alpha), Beta*: $(model.beta), L0: $(model.init_level), BO:$(model.init_trend)")
+    end
+
+    return res
+end
+
+function fit(model::Holt; v=0) # Set alpha + init_level
+    # Creating a copy of the user inputted params for the model as model.alpha and model.init_level will be updated later
+    base_alpha = model.alpha
+    base_beta = model.beta
+    base_init_level = model.init_level
+    base_init_trend = model.init_trend
+
+    # Model to return to ensure that input model is not modified
+    retModel = deepcopy(model)
+
+    if (isnothing(retModel.alpha))
+        @warn "Since no value was entered for 'alpha', it will be chosen"
+    end
+    if (isnothing(retModel.beta))
+        @warn "Since no value was entered for 'beta', it will be chosen"
+    end
+    if (isnothing(retModel.init_level))
+        @warn "Since no value was entered for 'init_level', it will be chosen"
+    end
+    if (isnothing(retModel.init_trend))
+        @warn "Since no value was entered for 'init_trend', it will be chosen"
+    end
+
+    # Optimize makeForecast_(model) - directly updates model
+    f(x) = SSE_(retModel, 
+                alpha=(isnothing(base_alpha) ? x[1] : base_alpha),
+                beta=(isnothing(base_beta) ? x[2] : base_beta),
+                init_level=(isnothing(base_init_level) ? x[3] : base_init_level),
+                init_trend=(isnothing(base_init_trend) ? x[4] : base_init_trend),
+                verbose=v)
+
+    
+    if isnothing(retModel.alpha) || isnothing(retModel.init_level) || isnothing(retModel.init_trend) || isnothing(retModel.beta) # if at least one value needs to be optimized
+        # lower and upper limits for alpha, beta, init_level, init_trend
+        lower = [0.0, 0.0, -Inf, -Inf] 
+        upper = [1.0, 1.0, Inf, Inf]
+
+        # Initial values for alpha, beta, init_level, init_trend (optimization starting points)
+        first_l0 = model.y[1]
+        first_b0 = model.y[1]
+        first_alpha = 0.0
+        first_beta = 0.0
+
+        # Optimize the SSE of the model through the function "f"
+        init_inputs = [first_alpha, first_beta, first_l0, first_b0]
+        res = optimize(f, lower, upper, init_inputs)
+        if v > 0
+            println(res)
+        end
+    end
+
+    return retModel
 end
