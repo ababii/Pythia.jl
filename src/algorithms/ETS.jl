@@ -207,9 +207,11 @@ mutable struct Holt <: ETSModel
     h::Integer
     alpha::Union{Nothing, Float64}
     beta::Union{Nothing, Float64}
+    phi::Union{Nothing, Float64}
     init_level::Union{Nothing, Float64}
     init_trend::Union{Nothing, Float64}
-    function Holt(y = []; h = 5, alpha = nothing, beta = nothing, init_level = nothing, init_trend = nothing) # Constuctor 
+    damped::Bool
+    function Holt(y = []; h = 5, alpha = nothing, beta = nothing, phi = nothing, init_level = nothing, init_trend = nothing, damped = false) # Constuctor 
         # Input Cleaning
         if length(y) <= 0
             error("The input array is empty.")
@@ -220,8 +222,9 @@ mutable struct Holt <: ETSModel
 
         cleanParams_(alpha, "alpha")
         cleanParams_(beta, "beta")
+        cleanParams_(phi, "phi", 0.80, 0.98)
 
-        return new(y, h, alpha, beta, init_level, init_trend)
+        return new(y, h, alpha, beta, phi, init_level, init_trend)
     end 
 end
 
@@ -229,6 +232,7 @@ function makeForecast_(model::Holt) # Return vector of fitted values of length h
     h = model.h
     alpha = model.alpha
     beta = model.beta
+    phi = model.phi
     init_level = model.init_level
     init_trend = model.init_trend
     y = model.y
@@ -257,15 +261,16 @@ function makeForecast_(model::Holt) # Return vector of fitted values of length h
     return forecast, SSE
 end
 
-function SSE_(model::Holt; alpha = nothing, beta = nothing, init_level = nothing, init_trend = nothing, verbose = 0) # Helper function for optimization
+function SSE_(model::Holt; alpha = nothing, beta = nothing, phi = nothing, init_level = nothing, init_trend = nothing, verbose = 0) # Helper function for optimization
     model.alpha = alpha
     model.beta = beta
+    model.phi = phi
     model.init_level = init_level
     model.init_trend = init_trend
 
     res = makeForecast_(model)[2]
     if verbose > 0
-        println("Error: $res, Alpha: $(model.alpha), Beta*: $(model.beta), L0: $(model.init_level), BO:$(model.init_trend)")
+        println("Error: $res, Alpha: $(model.alpha), Beta*: $(model.beta), Phi: $(model.phi), L0: $(model.init_level), BO:$(model.init_trend)")
     end
 
     return res
@@ -275,10 +280,11 @@ function fit(model::Holt; v=0) # Set alpha + init_level
     # Creating a copy of the user inputted params for the model as model.alpha and model.init_level will be updated later
     base_alpha = model.alpha
     base_beta = model.beta
+    base_phi = model.phi
     base_init_level = model.init_level
     base_init_trend = model.init_trend
 
-    # Model to return to ensure that input model is not modified
+    # copy of model to return to ensure that input model is not modified
     retModel = deepcopy(model)
 
     if (isnothing(retModel.alpha))
@@ -294,28 +300,43 @@ function fit(model::Holt; v=0) # Set alpha + init_level
         @warn "Since no value was entered for 'init_trend', it will be chosen"
     end
 
+    if damped
+        print("The Damped Trend Method will be used.")
+        if (isnothing(retModel.phi))
+            @warn "Since no value was entered for `phi`, it will be chosen"
+        end
+    else
+        if (!isnothing(retModel.phi))
+            @warn "Since a value was entered for `phi`, damping will occur despite 'damped' being set to false"
+        else
+            base_phi = 1 # No damping is equivalent to setting the damping parameter to 1
+        end
+    end
+
     # Optimize makeForecast_(model) - directly updates model
     f(x) = SSE_(retModel, 
                 alpha=(isnothing(base_alpha) ? x[1] : base_alpha),
                 beta=(isnothing(base_beta) ? x[2] : base_beta),
-                init_level=(isnothing(base_init_level) ? x[3] : base_init_level),
-                init_trend=(isnothing(base_init_trend) ? x[4] : base_init_trend),
+                phi=(isnothing(base_phi) ? x[3] : base_phi),
+                init_level=(isnothing(base_init_level) ? x[4] : base_init_level),
+                init_trend=(isnothing(base_init_trend) ? x[5] : base_init_trend),
                 verbose=v)
 
     
-    if isnothing(retModel.alpha) || isnothing(retModel.init_level) || isnothing(retModel.init_trend) || isnothing(retModel.beta) # if at least one value needs to be optimized
-        # lower and upper limits for alpha, beta, init_level, init_trend
-        lower = [0.0, 0.0, -Inf, -Inf] 
-        upper = [1.0, 1.0, Inf, Inf]
+    if isnothing(retModel.alpha) || isnothing(retModel.init_level) || isnothing(retModel.init_trend) || isnothing(retModel.beta) || (damped && isnothing(retModel.phi))# if at least one value needs to be optimized
+        # lower and upper limits for alpha, beta, phi, init_level, init_trend
+        lower = [0.0, 0.0, 0.8, -Inf, -Inf] 
+        upper = [1.0, 1.0, 0.98, Inf]
 
         # Initial values for alpha, beta, init_level, init_trend (optimization starting points)
         first_l0 = model.y[1]
         first_b0 = model.y[1]
         first_alpha = 0.0
         first_beta = 0.0
+        first_phi = 0.9
 
         # Optimize the SSE of the model through the function "f"
-        init_inputs = [first_alpha, first_beta, first_l0, first_b0]
+        init_inputs = [first_alpha, first_beta, first_phi, first_l0, first_b0]
         res = optimize(f, lower, upper, init_inputs)
         if v > 0
             println(res)
