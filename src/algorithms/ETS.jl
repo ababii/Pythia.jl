@@ -23,6 +23,7 @@ EXAMPLE USAGE:
     mdl = SES(observations, alpha = 0.4) 
     mdl = SES(observations, alpha = 0.25, init_level = 500.0) 
     mdl = SES(observations, h = 15, alpha = 0.3, init_level = 750.0)
+
 """
 mutable struct SES <: ETSModel
     y::Vector{AbstractFloat}
@@ -326,7 +327,7 @@ function fit(model::Holt; v=0) # Set alpha + init_level
     if isnothing(retModel.alpha) || isnothing(retModel.init_level) || isnothing(retModel.init_trend) || isnothing(retModel.beta) || (damped && isnothing(retModel.phi))# if at least one value needs to be optimized
         # lower and upper limits for alpha, beta, phi, init_level, init_trend
         lower = [0.0, 0.0, 0.8, -Inf, -Inf] 
-        upper = [1.0, 1.0, 0.98, Inf]
+        upper = [1.0, 1.0, 0.98, Inf, Inf]
 
         # Initial values for alpha, beta, init_level, init_trend (optimization starting points)
         first_l0 = model.y[1]
@@ -338,6 +339,7 @@ function fit(model::Holt; v=0) # Set alpha + init_level
         # Optimize the SSE of the model through the function "f"
         init_inputs = [first_alpha, first_beta, first_phi, first_l0, first_b0]
         res = optimize(f, lower, upper, init_inputs)
+        
         if v > 0
             println(res)
         end
@@ -345,3 +347,159 @@ function fit(model::Holt; v=0) # Set alpha + init_level
 
     return retModel
 end
+
+### HoltWinters 's Method - implementing the HoltWinters Additive method
+mutable struct HoltWinters <: ETSModel
+    y::Vector{AbstractFloat}
+    h::Integer
+    alpha::Union{Nothing, Float64}
+    beta::Union{Nothing, Float64}
+    gamma::Union{Nothing, Float64}
+    m::Integer
+    init_level::Union{Nothing, Float64}
+    init_trend::Union{Nothing, Float64}
+    init_season::Vector{AbstractFloat}
+    function HoltWinters(y = []; h = 5, alpha = nothing, beta = nothing, gamma = nothing, m, init_level = nothing, init_trend = nothing, init_season) # Constuctor 
+        # Input Cleaning
+        if length(y) <= 0
+            error("The input array is empty.")
+        end
+        if h <= 0
+            error("The number of prediction steps must be positive")
+        end
+        if isnothing(m)
+            error("You must provide a seasonal period 'm'")
+        end
+        if m <= 1
+            error("'m' must be an integer greater than 1")
+        end
+        if length(init_season) != m
+            error("The length of 'init_season' must be equal to `m`")
+        end
+
+        cleanParams_(alpha, "alpha")
+        cleanParams_(beta, "beta")
+        cleanParams_(gamma, "gamma")
+
+        return new(y, h, alpha, beta, gamma, m, init_level, init_trend, init_season)
+    end 
+end
+
+function makeForecast_(model::HoltWinters) # Return vector of fitted values of length h + SSE
+    h = model.h
+    alpha = model.alpha
+    beta = model.beta
+    gamma = model.gamma
+    m = model.m
+    init_level = model.init_level
+    init_trend = model.init_trend
+    init_season = model.init_season
+    y = model.y
+    data_size = length(y)
+
+    lvls = zeros(data_size + 1) # Stores level values, indices (0, T)
+    trends = zeros(data_size + 1) # Stores trend values, indices (0, T)
+    seasons = zeros(data_size + m) # Stores seasonal values
+    forecast = zeros(data_size + h) # Stores forecasted values, yhat, indices (1, T+h)
+
+    lvls[1] = init_level # Set l_0
+    trends[1] = init_trend # Set b_0
+    seasons[1:m] = init_season # Set s_0 ... s_m-1
+
+    SSE = 0.0 # Compute Sum of Squared Errors
+    k = trunc(Integer, (h-1)/m)
+
+    for i in 2:(length(lvls)) # Compute l_t's
+        season_idx = i + m - 1 # to start updating values after index m
+
+        lvls[i] = alpha * (y[i-1] - seasons[season_idx - m]) + (1 - alpha) * (lvls[i-1] + trends[i-1]) # level equation
+        trends[i] = beta * (lvls[i] - lvls[i-1]) + (1 - beta) * trends[i-1] # trend equation 
+        seasons[season_idx] = gamma * (y[i-1] - lvls[i-1] - trends[i-1]) + (1 - gamma) * seasons[season_idx - m] # season equation
+        forecast[i-1] = lvls[i-1] + 1 * trends[i-1] + season[season_idx + 1 - m * (k+1)] # one-step ahead forecast
+        SSE += (forecast[i-1] - y[i-1])^2
+    end
+
+    for i in 1:h # Set forecasted values
+        forecast[data_size + i] = lvls[end] + i * trends[end + i - m * (k+1)]
+    end
+
+    return forecast, SSE
+end
+
+function SSE_(model::HoltWinters; alpha = nothing, beta = nothing, gamma = nothing, init_level = nothing, init_trend = nothing, verbose = 0) # Helper function for optimization
+    model.alpha = alpha
+    model.beta = beta
+    model.gamma = gamma
+    model.init_level = init_level
+    model.init_trend = init_trend
+
+    res = makeForecast_(model)[2]
+    if verbose > 0
+        println("Error: $res, Alpha: $(model.alpha), Beta*: $(model.beta), Gamma: $(model.gamma), L0: $(model.init_level), BO:$(model.init_trend), S0:$(model.init_season)")
+    end
+
+    return res
+end
+
+function fit(model::HoltWinters; v=0) # Set alpha + init_level
+    # Creating a copy of the user inputted params for the model as model.alpha and model.init_level will be updated later
+    base_alpha = model.alpha
+    base_beta = model.beta
+    base_gamma = model.gamma
+    base_init_level = model.init_level
+    base_init_trend = model.init_trend
+
+    # copy of model to return to ensure that input model is not modified
+    retModel = deepcopy(model)
+
+    if (isnothing(retModel.alpha))
+        @warn "Since no value was entered for 'alpha', it will be chosen"
+    end
+    if (isnothing(retModel.beta))
+        @warn "Since no value was entered for 'beta', it will be chosen"
+    end
+    if (isnothing(retModel.gamma))
+        @warn "Since no value was entered for 'gamma', it will be chosen"
+    end
+    if (isnothing(retModel.init_level))
+        @warn "Since no value was entered for 'init_level', it will be chosen"
+    end
+    if (isnothing(retModel.init_trend))
+        @warn "Since no value was entered for 'init_trend', it will be chosen"
+    end
+
+   
+    # Optimize makeForecast_(model) - directly updates model
+    f(x) = SSE_(retModel, 
+                alpha=(isnothing(base_alpha) ? x[1] : base_alpha),
+                beta=(isnothing(base_beta) ? x[2] : base_beta),
+                gamma=(isnothing(base_gamma) ? x[3] : base_gamma),
+                init_level=(isnothing(base_init_level) ? x[4] : base_init_level),
+                init_trend=(isnothing(base_init_trend) ? x[5] : base_init_trend),
+                verbose=v)
+
+    
+    if isnothing(retModel.alpha) || isnothing(retModel.beta) || (isnothing(retModel.gamma)) || isnothing(retModel.init_level) || isnothing(retModel.init_trend) # if at least one value needs to be optimized
+        # lower and upper limits for alpha, beta, gamma, init_level, init_trend
+        lower = [0.0, 0.0, 0.0, -Inf, -Inf] 
+        upper = [1.0, 1.0, 1.0, Inf, Inf]
+
+        # Initial values for alpha, beta, init_level, init_trend (optimization starting points)
+        first_l0 = model.y[1]
+        first_b0 = model.y[1]
+        first_alpha = 0.0
+        first_beta = 0.0
+        first_gamma = 0.0
+
+        # Optimize the SSE of the model through the function "f"
+        init_inputs = [first_alpha, first_beta, first_gamma, first_l0, first_b0]
+        res = optimize(f, lower, upper, init_inputs)
+        
+        if v > 0
+            println(res)
+        end
+    end
+
+    return retModel
+end
+
