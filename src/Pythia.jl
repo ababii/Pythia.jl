@@ -4,7 +4,7 @@ using Base: Integer, Float64, sign_mask
 using Statistics, Distributions
 
 export sglasso, glasso, lasso
-export MeanForecast, NaiveForecast, SES, Holt
+export MeanForecast, NaiveForecast, SES, Holt, HoltWinters
 export fit, predict
 
 include("algorithms/sglasso.jl")
