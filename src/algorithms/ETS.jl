@@ -199,7 +199,9 @@ References:
         Australia. OTexts.com/fpp3. Accessed on April 19th 2020.
 """
 function predict(model::ETSModel)
-    return makeForecast_(model)[1]
+    fitted_vals = makeForecast_(model)[1]
+    h = model.h
+    return fitted_vals[end-(h-1):end]
 end
 
 ### Holt's Method - implementing Holt's linear trend method
@@ -249,14 +251,21 @@ function makeForecast_(model::Holt) # Return vector of fitted values of length h
     SSE = 0.0 # Compute Sum of Squared Errors
 
     for i in 2:(length(lvls)) # Compute l_t's
-        lvls[i] = alpha * y[i-1] + (1 - alpha) * (lvls[i-1] + trends[i-1]) # level equation
-        trends[i] = beta * (lvls[i] - lvls[i-1]) + (1 - beta) * trends[i-1] # trned equation 
-        forecast[i-1] = lvls[i-1] + 1 * trends[i-1] # one-step ahead forecast
+        lvls[i] = alpha * y[i-1] + (1 - alpha) * (lvls[i-1] + phi * trends[i-1]) # level equation
+        trends[i] = beta * (lvls[i] - lvls[i-1]) + (1 - beta) * phi * trends[i-1] # trned equation 
+        forecast[i-1] = lvls[i-1] + phi * trends[i-1] # one-step ahead forecast
         SSE += (forecast[i-1] - y[i-1])^2
     end
-
+    
     for i in 1:h # Set forecasted values
-        forecast[data_size + i] = lvls[end] + i * trends[end]
+        if i == 1
+            trend_coefficient = phi
+        elseif phi != 1
+            trend_coefficient = phi * (1 - phi ^ h) / (1 - phi)
+        else
+            trend_coefficient = i
+        end
+        forecast[data_size + i] = lvls[end] + trend_coefficient * trends[end]
     end
 
     return forecast, SSE
@@ -301,8 +310,8 @@ function fit(model::Holt; v=0) # Set alpha + init_level
         @warn "Since no value was entered for 'init_trend', it will be chosen"
     end
 
-    if damped
-        print("The Damped Trend Method will be used.")
+    if retModel.damped
+        print("The Damped Trend Method will be used.\n")
         if (isnothing(retModel.phi))
             @warn "Since no value was entered for `phi`, it will be chosen"
         end
@@ -327,13 +336,13 @@ function fit(model::Holt; v=0) # Set alpha + init_level
     if isnothing(retModel.alpha) || isnothing(retModel.init_level) || isnothing(retModel.init_trend) || isnothing(retModel.beta) || (damped && isnothing(retModel.phi))# if at least one value needs to be optimized
         # lower and upper limits for alpha, beta, phi, init_level, init_trend
         lower = [0.0, 0.0, 0.8, -Inf, -Inf] 
-        upper = [1.0, 1.0, 0.98, Inf, Inf]
+        upper = [1.0, 1.0, 0.995, Inf, Inf]
 
         # Initial values for alpha, beta, init_level, init_trend (optimization starting points)
         first_l0 = model.y[1]
         first_b0 = model.y[1]
-        first_alpha = 0.0
-        first_beta = 0.0
+        first_alpha = 0.1
+        first_beta = 0.1
         first_phi = 0.9
 
         # Optimize the SSE of the model through the function "f"
@@ -348,7 +357,7 @@ function fit(model::Holt; v=0) # Set alpha + init_level
     return retModel
 end
 
-### HoltWinters 's Method - implementing the HoltWinters Additive method
+### HoltWinters's Method - implementing the HoltWinters Additive method
 mutable struct HoltWinters <: ETSModel
     y::Vector{AbstractFloat}
     h::Integer
@@ -407,6 +416,7 @@ function makeForecast_(model::HoltWinters) # Return vector of fitted values of l
     seasons[1:m] = init_season # Set s_0 ... s_m-1
 
     SSE = 0.0 # Compute Sum of Squared Errors
+
     k = trunc(Integer, (h-1)/m)
 
     for i in 2:(length(lvls)) # Compute l_t's
@@ -415,7 +425,7 @@ function makeForecast_(model::HoltWinters) # Return vector of fitted values of l
         lvls[i] = alpha * (y[i-1] - seasons[season_idx - m]) + (1 - alpha) * (lvls[i-1] + trends[i-1]) # level equation
         trends[i] = beta * (lvls[i] - lvls[i-1]) + (1 - beta) * trends[i-1] # trend equation 
         seasons[season_idx] = gamma * (y[i-1] - lvls[i-1] - trends[i-1]) + (1 - gamma) * seasons[season_idx - m] # season equation
-        forecast[i-1] = lvls[i-1] + 1 * trends[i-1] + season[season_idx + 1 - m * (k+1)] # one-step ahead forecast
+        forecast[i-1] = lvls[i-1] + 1 * trends[i-1] + seasons[season_idx + 1 - m] # one-step ahead forecast
         SSE += (forecast[i-1] - y[i-1])^2
     end
 
