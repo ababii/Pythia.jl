@@ -248,7 +248,7 @@ function makeForecast_(model::Holt) # Return vector of fitted values of length h
     lvls[1] = init_level # Set l_0
     trends[1] = init_trend # Set b_0
 
-    SSE = 0.0 # Compute Sum of Squared Errors
+    SSE = 0.0 # Compute Sum of Squared Errors 
 
     for i in 2:(length(lvls)) # Compute l_t's
         lvls[i] = alpha * y[i-1] + (1 - alpha) * (lvls[i-1] + phi * trends[i-1]) # level equation

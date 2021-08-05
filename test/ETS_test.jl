@@ -56,4 +56,4 @@ y = y[25:68]
 mdl = HoltWinters(y, h = 5, m = 4, init_season = [9.70, -9.31, -1.69, 1.31])
 fitted_mdl = fit(mdl, v = 0)
 yhat = predict(fitted_mdl)
-# @test yhat ≈ yactual rtol=0.05
+# @test yhat ≈ yactual rtol=0.05 
